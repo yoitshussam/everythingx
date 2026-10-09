@@ -3,7 +3,9 @@ package ffdb
 import (
 	"database/sql"
 	"log"
+	"math"
 	"os"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"time"
@@ -183,20 +185,41 @@ func prepareStatements(db *sql.DB) {
 	}
 }
 
-// Performs a substring search for filenames containing the given term.
-// For terms >= 3 characters, uses FTS5 trigram index for fast lookup.
+// Performs a substring search for filenames containing the given term(s).
+// The query is split on whitespace, and every resulting word must appear in the
+// filename as a substring, in any order and with anything between them — the
+// same behaviour as Everything on Windows (e.g. "transcript signed" matches a
+// file named "signed_transcript.pdf").
+//
+// For terms >= 3 characters, uses the FTS5 trigram index for fast lookup.
 // For shorter terms, uses prefix search with the B-tree index.
-func PrefixSearch(prefix string, limit int) ([]*shared.SearchResult, error) {
+func PrefixSearch(query string, limit int) ([]*shared.SearchResult, error) {
+	terms := strings.Fields(query)
+	if len(terms) == 0 {
+		return nil, nil
+	}
+
+	// A single term keeps the original indexed lookup.
+	if len(terms) == 1 {
+		return prefixSearchSingle(terms[0], limit)
+	}
+
+	return prefixSearchMulti(terms, limit)
+}
+
+// prefixSearchSingle performs a search for a single term, keeping the original
+// behaviour: trigram substring match for terms >= 3 chars, prefix match otherwise.
+func prefixSearchSingle(term string, limit int) ([]*shared.SearchResult, error) {
 	var rows *sql.Rows
 	var err error
 
-	if len(prefix) >= 3 && trigramSearchStmt != nil {
+	if len(term) >= 3 && trigramSearchStmt != nil {
 		// Wrap in double quotes so FTS5 treats the term as a literal phrase,
 		// preventing characters like "." from causing syntax errors.
-		quoted := `"` + strings.ReplaceAll(prefix, `"`, `""`) + `"`
+		quoted := `"` + strings.ReplaceAll(term, `"`, `""`) + `"`
 		rows, err = trigramSearchStmt.Query(quoted, limit)
 	} else {
-		rows, err = prefixSearchStmt.Query(prefix+"%", limit)
+		rows, err = prefixSearchStmt.Query(term+"%", limit)
 	}
 	if err != nil {
 		return nil, err
@@ -213,6 +236,108 @@ func PrefixSearch(prefix string, limit int) ([]*shared.SearchResult, error) {
 	}
 
 	return results, nil
+}
+
+// prefixSearchMulti searches for files whose names contain every one of the
+// given terms, in any order. Long terms are combined into a single FTS5 AND
+// query so each must appear as a substring; short terms (which the trigram
+// tokenizer cannot index) are applied as a case-insensitive substring filter.
+func prefixSearchMulti(terms []string, limit int) ([]*shared.SearchResult, error) {
+	var longTerms, shortTerms []string
+	for _, t := range terms {
+		if len(t) >= 3 {
+			longTerms = append(longTerms, t)
+		} else {
+			shortTerms = append(shortTerms, t)
+		}
+	}
+
+	var results []*shared.SearchResult
+	var err error
+
+	if len(longTerms) > 0 && trigramSearchStmt != nil {
+		// Join the long terms into a single AND query so every one of them
+		// must appear as a substring anywhere in the filename.
+		quoted := make([]string, len(longTerms))
+		for i, t := range longTerms {
+			quoted[i] = `"` + strings.ReplaceAll(t, `"`, `""`) + `"`
+		}
+		results, err = queryTrigram(strings.Join(quoted, " AND "))
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		// No long terms (or no trigram index available): fall back to a prefix
+		// match on the first term, matching the single-term fallback behaviour.
+		results, err = queryPrefix(terms[0] + "%")
+		if err != nil {
+			return nil, err
+		}
+		shortTerms = terms[1:]
+	}
+
+	if len(shortTerms) > 0 {
+		results = filterBySubstrings(results, shortTerms)
+	}
+
+	if len(results) > limit {
+		results = results[:limit]
+	}
+	return results, nil
+}
+
+// queryTrigram runs a trigram FTS query and returns all matching results.
+func queryTrigram(ftsQuery string) ([]*shared.SearchResult, error) {
+	rows, err := trigramSearchStmt.Query(ftsQuery, math.MaxInt)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanSearchResults(rows)
+}
+
+// queryPrefix runs a prefix (LIKE) query and returns all matching results.
+func queryPrefix(prefix string) ([]*shared.SearchResult, error) {
+	rows, err := prefixSearchStmt.Query(prefix, math.MaxInt)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanSearchResults(rows)
+}
+
+// scanSearchResults reads rows into a slice of search results.
+func scanSearchResults(rows *sql.Rows) ([]*shared.SearchResult, error) {
+	var results []*shared.SearchResult
+	for rows.Next() {
+		result := &shared.SearchResult{}
+		if err := rows.Scan(&result.Fullpath, &result.ObjectType); err != nil {
+			return nil, err
+		}
+		results = append(results, result)
+	}
+	return results, rows.Err()
+}
+
+// filterBySubstrings keeps only results whose filename contains every term,
+// matching case-insensitively. Used for short terms that the trigram index
+// cannot represent.
+func filterBySubstrings(results []*shared.SearchResult, terms []string) []*shared.SearchResult {
+	out := results[:0]
+	for _, r := range results {
+		name := strings.ToLower(filepath.Base(r.Fullpath))
+		match := true
+		for _, term := range terms {
+			if !strings.Contains(name, strings.ToLower(term)) {
+				match = false
+				break
+			}
+		}
+		if match {
+			out = append(out, r)
+		}
+	}
+	return out
 }
 
 // Returns the count of records in the files table.

@@ -151,7 +151,7 @@ func TestUpdateCellRendersIconAndSelection(t *testing.T) {
 	defer func() { tableData, selectedRow = nil, -1 }()
 
 	tableData = []RowData{{
-		Name:         []string{"", "report", ".pdf"},
+		Name:         []NameSegment{{Text: "report", Highlight: true}, {Text: ".pdf"}},
 		Base:         "report.pdf",
 		Path:         "/tmp/",
 		Size:         "1.0K",
@@ -255,8 +255,8 @@ func TestUpdateCellClearsHighlightOnUnselectedRows(t *testing.T) {
 
 	result := &shared.SearchResult{Fullpath: "/tmp/a", ObjectType: shared.ItemIsFile}
 	tableData = []RowData{
-		{Name: []string{"a", "", ""}, Base: "a", SearchResult: result},
-		{Name: []string{"b", "", ""}, Base: "b", SearchResult: result},
+		{Name: []NameSegment{{Text: "a"}}, Base: "a", SearchResult: result},
+		{Name: []NameSegment{{Text: "b"}}, Base: "b", SearchResult: result},
 	}
 	selectedRow = 0
 
@@ -279,8 +279,8 @@ func TestHoverPaintsWholeRow(t *testing.T) {
 
 	result := &shared.SearchResult{Fullpath: "/tmp/a", ObjectType: shared.ItemIsFile}
 	tableData = []RowData{
-		{Name: []string{"a", "", ""}, Base: "a", SearchResult: result},
-		{Name: []string{"b", "", ""}, Base: "b", SearchResult: result},
+		{Name: []NameSegment{{Text: "a"}}, Base: "a", SearchResult: result},
+		{Name: []NameSegment{{Text: "b"}}, Base: "b", SearchResult: result},
 	}
 	selectedRow = -1
 	hoveredRow = 1
@@ -307,7 +307,7 @@ func TestSelectionWinsOverHover(t *testing.T) {
 	defer func() { tableData, selectedRow, hoveredRow = nil, -1, -1 }()
 
 	result := &shared.SearchResult{Fullpath: "/tmp/a", ObjectType: shared.ItemIsFile}
-	tableData = []RowData{{Name: []string{"a", "", ""}, Base: "a", SearchResult: result}}
+	tableData = []RowData{{Name: []NameSegment{{Text: "a"}}, Base: "a", SearchResult: result}}
 	selectedRow = 0
 	hoveredRow = 0
 
@@ -328,8 +328,8 @@ func TestCellHoverLightsItsRow(t *testing.T) {
 
 	result := &shared.SearchResult{Fullpath: "/tmp/a", ObjectType: shared.ItemIsFile}
 	tableData = []RowData{
-		{Name: []string{"a", "", ""}, Base: "a", SearchResult: result},
-		{Name: []string{"b", "", ""}, Base: "b", SearchResult: result},
+		{Name: []NameSegment{{Text: "a"}}, Base: "a", SearchResult: result},
+		{Name: []NameSegment{{Text: "b"}}, Base: "b", SearchResult: result},
 	}
 	hoveredRow = -1
 
@@ -351,7 +351,7 @@ func TestCellMouseOutClearsRow(t *testing.T) {
 	defer func() { tableData, selectedRow, hoveredRow = nil, -1, -1 }()
 
 	result := &shared.SearchResult{Fullpath: "/tmp/a", ObjectType: shared.ItemIsFile}
-	tableData = []RowData{{Name: []string{"a", "", ""}, Base: "a", SearchResult: result}}
+	tableData = []RowData{{Name: []NameSegment{{Text: "a"}}, Base: "a", SearchResult: result}}
 
 	cell := table.CreateCell()
 	table.UpdateCell(widget.TableCellID{Row: 0, Col: 0}, cell)
@@ -376,7 +376,7 @@ func TestScrollDropsHoverHighlight(t *testing.T) {
 	for i := range rows {
 		path := fmt.Sprintf("/tmp/file%02d.go", i)
 		rows[i] = RowData{
-			Name:         []string{fmt.Sprintf("file%02d", i), "", ".go"},
+			Name:         []NameSegment{{Text: fmt.Sprintf("file%02d", i)}, {Text: ".go"}},
 			Base:         fmt.Sprintf("file%02d.go", i),
 			Path:         "/tmp/",
 			SearchResult: &shared.SearchResult{Fullpath: path, ObjectType: shared.ItemIsFile},
@@ -410,7 +410,7 @@ func TestToolTipCancelKeepsRowHighlight(t *testing.T) {
 	defer func() { tableData, selectedRow, hoveredRow, mainWindow = nil, -1, -1, nil }()
 
 	result := &shared.SearchResult{Fullpath: "/tmp/a", ObjectType: shared.ItemIsFile}
-	tableData = []RowData{{Name: []string{"a", "", ""}, Base: "a", SearchResult: result}}
+	tableData = []RowData{{Name: []NameSegment{{Text: "a"}}, Base: "a", SearchResult: result}}
 
 	cell := table.CreateCell()
 	table.UpdateCell(widget.TableCellID{Row: 0, Col: 0}, cell)
@@ -436,8 +436,8 @@ func TestCellSelectsOnMouseDown(t *testing.T) {
 
 	result := &shared.SearchResult{Fullpath: "/tmp/a", ObjectType: shared.ItemIsFile}
 	tableData = []RowData{
-		{Name: []string{"a", "", ""}, Base: "a", SearchResult: result},
-		{Name: []string{"b", "", ""}, Base: "b", SearchResult: result},
+		{Name: []NameSegment{{Text: "a"}}, Base: "a", SearchResult: result},
+		{Name: []NameSegment{{Text: "b"}}, Base: "b", SearchResult: result},
 	}
 	selectedRow = -1
 
@@ -461,7 +461,7 @@ func TestContextMenuCancelsPendingToolTip(t *testing.T) {
 	defer func() { tableData, selectedRow, mainWindow = nil, -1, nil }()
 
 	result := &shared.SearchResult{Fullpath: "/tmp/a", ObjectType: shared.ItemIsFile}
-	tableData = []RowData{{Name: []string{"a", "", ""}, Base: "a", SearchResult: result}}
+	tableData = []RowData{{Name: []NameSegment{{Text: "a"}}, Base: "a", SearchResult: result}}
 
 	cell := table.CreateCell()
 	table.UpdateCell(widget.TableCellID{Row: 0, Col: 0}, cell)
@@ -486,8 +486,8 @@ func TestRecyclingCellCancelsPendingToolTip(t *testing.T) {
 	defer func() { tableData, selectedRow = nil, -1 }()
 
 	tableData = []RowData{
-		{Name: []string{"a", "", ""}, Base: "a", SearchResult: &shared.SearchResult{Fullpath: "/tmp/a", ObjectType: shared.ItemIsFile}},
-		{Name: []string{"b", "", ""}, Base: "b", SearchResult: &shared.SearchResult{Fullpath: "/tmp/b", ObjectType: shared.ItemIsFile}},
+		{Name: []NameSegment{{Text: "a"}}, Base: "a", SearchResult: &shared.SearchResult{Fullpath: "/tmp/a", ObjectType: shared.ItemIsFile}},
+		{Name: []NameSegment{{Text: "b"}}, Base: "b", SearchResult: &shared.SearchResult{Fullpath: "/tmp/b", ObjectType: shared.ItemIsFile}},
 	}
 
 	cell := table.CreateCell()
@@ -544,5 +544,57 @@ func TestMoveSelectionWithNoResults(t *testing.T) {
 
 	if selectedRow != -1 {
 		t.Errorf("selected row %d with no results, want -1", selectedRow)
+	}
+}
+
+// nameSegments must split the file name into segments that reconstruct the
+// original, and flag every matched word regardless of word order.
+func TestNameSegmentsMultiWord(t *testing.T) {
+	segs := nameSegments("signed_transcript.pdf", "transcript signed")
+
+	got := ""
+	for _, s := range segs {
+		got += s.Text
+	}
+	if got != "signed_transcript.pdf" {
+		t.Fatalf("segments reconstruct to %q, want the original name", got)
+	}
+
+	want := []NameSegment{
+		{Text: "signed", Highlight: true},
+		{Text: "_", Highlight: false},
+		{Text: "transcript", Highlight: true},
+		{Text: ".pdf", Highlight: false},
+	}
+	if len(segs) != len(want) {
+		t.Fatalf("got %d segments, want %d: %#v", len(segs), len(want), segs)
+	}
+	for i := range want {
+		if segs[i].Text != want[i].Text || segs[i].Highlight != want[i].Highlight {
+			t.Errorf("segment %d = %#v, want %#v", i, segs[i], want[i])
+		}
+	}
+}
+
+// Case differences must still highlight (search is case-insensitive).
+func TestNameSegmentsCaseInsensitive(t *testing.T) {
+	segs := nameSegments("Signed_University_Transcript.pdf", "transcript signed")
+
+	count := 0
+	for _, s := range segs {
+		if s.Highlight {
+			count++
+		}
+	}
+	if count != 2 {
+		t.Errorf("highlighted %d segments, want 2 (%#v)", count, segs)
+	}
+}
+
+// With no matching terms, the whole name is returned as a single plain segment.
+func TestNameSegmentsNoMatch(t *testing.T) {
+	segs := nameSegments("report.pdf", "zzz")
+	if len(segs) != 1 || segs[0].Text != "report.pdf" || segs[0].Highlight {
+		t.Errorf("got %#v, want a single plain segment with the full name", segs)
 	}
 }

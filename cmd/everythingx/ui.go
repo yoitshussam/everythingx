@@ -33,14 +33,21 @@ const maxSearchResults int = 1000
 const searchDebounce = 120 * time.Millisecond
 
 type RowData struct {
-	Name         []string // before/match/after, for highlighting the search term
-	Base         string   // the whole file name, for sorting
+	Name         []NameSegment // the file name split into segments for highlighting
+	Base         string        // the whole file name, for sorting
 	Path         string
 	Size         string
 	Modified     string
 	SizeBytes    int64 // -1 for directories, which show "--"
 	ModTime      time.Time
 	SearchResult *shared.SearchResult
+}
+
+// NameSegment is one piece of a file name, optionally flagged as a matched
+// search term so it can be highlighted in the results list.
+type NameSegment struct {
+	Text      string
+	Highlight bool
 }
 
 // Sort state for the results table. Column -1 keeps the order the database
@@ -140,10 +147,8 @@ func handleAutoCompleteEntryChanged(searchText string, t *widget.Table, statusBa
 				sizeBytes = -1
 			}
 
-			beforeTerm, searchTerm, afterTerm := shared.SplitFileName(base, searchText)
-
 			newData = append(newData, RowData{
-				Name:         []string{beforeTerm, searchTerm, afterTerm},
+				Name:         nameSegments(base, searchText),
 				Base:         base,
 				Path:         dir,
 				Size:         size,
@@ -278,9 +283,9 @@ func (c *tooltipCell) MouseDown(e *desktop.MouseEvent) {
 
 func (c *tooltipCell) MouseUp(_ *desktop.MouseEvent) {}
 
-// DoubleTapped reveals the file in the system file manager.
+// DoubleTapped opens the file with its default application.
 func (c *tooltipCell) DoubleTapped(_ *fyne.PointEvent) {
-	revealFile(c.path)
+	openFile(c.path)
 }
 
 // TappedSecondary opens the row's context menu.
@@ -297,6 +302,7 @@ func (c *tooltipCell) TappedSecondary(e *fyne.PointEvent) {
 
 	path := c.path
 	menu := fyne.NewMenu("",
+		fyne.NewMenuItem("Open", func() { openFile(path) }),
 		fyne.NewMenuItem(revealLabel, func() { revealFile(path) }),
 		fyne.NewMenuItemSeparator(),
 		fyne.NewMenuItem("Copy Name", func() { copyToClipboard(filepath.Base(path)) }),
@@ -388,10 +394,10 @@ func revealFile(path string) {
 	go handleOpenFile(path)
 }
 
-// openSelected reveals the highlighted result in the system file manager.
+// openSelected opens the highlighted result with its default application.
 func openSelected() {
 	if selectedRow >= 0 && selectedRow < len(tableData) {
-		revealFile(tableData[selectedRow].SearchResult.Fullpath)
+		openFile(tableData[selectedRow].SearchResult.Fullpath)
 	}
 }
 
@@ -498,6 +504,80 @@ func inlineNameSegment(text string, highlight bool) *widget.TextSegment {
 	return &widget.TextSegment{Text: text, Style: style}
 }
 
+// nameSegments splits a file name into segments, marking every occurrence of a
+// search term (case-insensitive) for highlighting. It splits the query the same
+// way PrefixSearch does, so a multi-word search highlights each word separately.
+func nameSegments(name, searchText string) []NameSegment {
+	terms := strings.Fields(searchText)
+	if len(terms) == 0 {
+		return []NameSegment{{Text: name}}
+	}
+
+	lowerTerms := make([]string, len(terms))
+	for i, t := range terms {
+		lowerTerms[i] = strings.ToLower(t)
+	}
+	lower := strings.ToLower(name)
+
+	var segments []NameSegment
+	pos := 0
+	for pos < len(name) {
+		matchStart, matchLen := -1, 0
+		for _, lt := range lowerTerms {
+			if idx := strings.Index(lower[pos:], lt); idx >= 0 {
+				abs := pos + idx
+				if matchStart == -1 || abs < matchStart {
+					matchStart = abs
+					matchLen = len(lt)
+				}
+			}
+		}
+		if matchStart == -1 {
+			if pos < len(name) {
+				segments = append(segments, NameSegment{Text: name[pos:]})
+			}
+			break
+		}
+		if matchStart > pos {
+			segments = append(segments, NameSegment{Text: name[pos:matchStart]})
+		}
+		segments = append(segments, NameSegment{Text: name[matchStart : matchStart+matchLen], Highlight: true})
+		pos = matchStart + matchLen
+	}
+
+	return segments
+}
+
+// nameSegmentsToRichText converts pre-split name segments into RichText
+// segments, bolding the highlighted (matched) parts. If nothing is highlighted,
+// or the first highlight sits beyond the column edge, the whole name is
+// rendered as a single truncating segment instead.
+func nameSegmentsToRichText(segs []NameSegment, base string) []widget.RichTextSegment {
+	// Measure how far into the name the first highlight starts.
+	leading := 0
+	hasHighlight := false
+	for _, s := range segs {
+		if s.Highlight {
+			hasHighlight = true
+			break
+		}
+		leading += len(s.Text)
+	}
+
+	if !hasHighlight || leading > nameHighlightMaxChars {
+		return []widget.RichTextSegment{plainNameSegment(base)}
+	}
+
+	out := make([]widget.RichTextSegment, 0, len(segs))
+	for _, s := range segs {
+		if s.Text == "" {
+			continue
+		}
+		out = append(out, inlineNameSegment(s.Text, s.Highlight))
+	}
+	return out
+}
+
 func makeTable() *widget.Table {
 	tableData = make([]RowData, 0, maxSearchResults)
 
@@ -563,26 +643,7 @@ func makeTable() *widget.Table {
 
 			switch id.Col {
 			case 0:
-				before, term, after := row.Name[0], row.Name[1], row.Name[2]
-				var segments []widget.RichTextSegment
-				if term == "" || len(before)+len(term) > nameHighlightMaxChars {
-					// No match, or the highlighted term sits too far right to
-					// fit before the column edge. Render the whole name as a
-					// single trailing segment so RichText truncates it with an
-					// ellipsis — its ellipsis only applies to the last segment,
-					// so a long leading segment would otherwise overflow into
-					// the Path column.
-					segments = []widget.RichTextSegment{plainNameSegment(before + term + after)}
-				} else {
-					if before != "" {
-						segments = append(segments, inlineNameSegment(before, false))
-					}
-					segments = append(segments, inlineNameSegment(term, true))
-					if after != "" {
-						segments = append(segments, inlineNameSegment(after, false))
-					}
-				}
-				richText.Segments = segments
+				richText.Segments = nameSegmentsToRichText(row.Name, row.Base)
 			case 1:
 				richText.Segments = []widget.RichTextSegment{&widget.TextSegment{
 					Text: row.Path,
